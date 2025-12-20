@@ -1,0 +1,1529 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Planner Interno (Admin)</title>
+  <style>
+    :root { font-family: system-ui, Arial; }
+    body { margin: 16px; max-width: 1200px; }
+    h1 { margin: 0 0 10px; }
+    .muted { color:#666; }
+    .tabs { display:flex; gap:8px; flex-wrap:wrap; margin: 10px 0 14px; align-items:center; }
+    .tabs button { padding:10px 12px; border:1px solid #ccc; background:#fff; border-radius:10px; cursor:pointer; }
+    .tabs button.active { border-color:#111; }
+    .card { border:1px solid #ddd; border-radius:14px; padding:14px; margin: 12px 0; }
+    .grid { display:grid; gap:10px; grid-template-columns: repeat(2, minmax(0,1fr)); }
+    @media (max-width: 760px){ .grid { grid-template-columns: 1fr; } }
+    label { display:flex; flex-direction:column; gap:6px; font-size:14px; }
+    input, select, textarea { padding:10px; border:1px solid #ccc; border-radius:10px; }
+    textarea { min-height: 70px; resize: vertical; }
+    .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    .btn { padding:10px 12px; border:1px solid #111; background:#111; color:#fff; border-radius:10px; cursor:pointer; }
+    .btn.secondary { background:#fff; color:#111; border-color:#ccc; }
+    .btn.danger { background:#b00020; border-color:#b00020; }
+    .btn.small { padding:7px 10px; border-radius:10px; }
+    table { width:100%; border-collapse: collapse; }
+    th, td { padding:10px; border-bottom:1px solid #eee; text-align:left; vertical-align: top; }
+    .pill { display:inline-block; padding:4px 8px; border:1px solid #ddd; border-radius:999px; font-size:12px; }
+    .msg { padding:10px 12px; border-radius:12px; margin:10px 0; }
+    .ok { background:#e8fff1; border:1px solid #b7f3cc; }
+    .err { background:#ffecec; border:1px solid #ffc7c7; }
+    .split { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .searchBox { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .searchBox input { min-width: 260px; }
+    .subcard { border:1px dashed #ddd; border-radius:14px; padding:12px; margin-top:10px; }
+
+    .toggle { display:flex; gap:8px; flex-wrap:wrap; }
+    .toggle button { padding:10px 12px; border:1px solid #ccc; background:#fff; border-radius:10px; cursor:pointer; }
+    .toggle button.active { border-color:#111; background:#111; color:#fff; }
+
+    tr.warn td { background: #fff4b5; }   /* Libres: coincidencias */
+    tr.wait td { background: #f3f4ff; }   /* Descansos: en espera */
+  </style>
+
+  <!-- Export Excel -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+  <h1>Planner Interno (Admin)</h1>
+  <div class="muted">
+    Uso interno. Guarda datos en este dispositivo (localStorage). En GitHub Pages lo ves como “app” en Android.
+  </div>
+
+  <div id="msg"></div>
+
+  <!-- BUSQUEDA EMPLEADO -->
+  <div class="card">
+    <h2>Buscar empleado</h2>
+    <div class="searchBox">
+      <input id="empSearch" placeholder="Buscar por nombre o apellido..." />
+      <button class="btn secondary" id="clearSearch">Limpiar</button>
+    </div>
+    <div id="empResults" class="subcard" style="display:none"></div>
+  </div>
+
+  <div class="tabs">
+    <button data-tab="hoy">HOY</button>
+    <button data-tab="personal" class="active">Personal</button>
+    <button data-tab="turnos">Turnos</button>
+    <button data-tab="libres">Libres</button>
+    <button data-tab="descansos">Descansos 30m (Parque)</button>
+
+    <button id="exportExcelBtn" class="secondary">Exportar Excel (.xlsx)</button>
+    <button id="exportBtn" class="secondary">Exportar JSON</button>
+    <button id="importBtn" class="secondary">Importar JSON</button>
+    <button id="resetBtn" class="danger">Reset</button>
+    <input id="importFile" type="file" accept="application/json" style="display:none" />
+  </div>
+
+  <!-- HOY -->
+  <section id="tab-hoy" class="card" style="display:none">
+    <h2>HOY</h2>
+    <div class="muted">Resumen del día: turnos, libres y descansos.</div>
+
+    <div class="subcard" style="margin-top:12px">
+      <b>Turnos de hoy</b>
+      <table style="margin-top:8px">
+        <thead>
+          <tr><th>Persona</th><th>Sector</th><th>Zona</th><th>Puesto</th><th>Horario</th><th>Notas</th></tr>
+        </thead>
+        <tbody id="todayShiftsTbody"></tbody>
+      </table>
+    </div>
+
+    <div class="subcard">
+      <b>Libres de hoy</b>
+      <table style="margin-top:8px">
+        <thead>
+          <tr><th>Persona</th><th>Sector</th><th>Tipo</th><th>Estado</th><th>Nota</th></tr>
+        </thead>
+        <tbody id="todayLeavesTbody"></tbody>
+      </table>
+    </div>
+
+    <div class="subcard">
+      <b>Descansos de hoy (Parque)</b>
+      <table style="margin-top:8px">
+        <thead>
+          <tr><th>Inicio</th><th>Fin</th><th>Zona</th><th>Puesto</th><th>Empleado</th><th>Cubre</th><th>Estado</th></tr>
+        </thead>
+        <tbody id="todayBreaksTbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- PERSONAL -->
+  <section id="tab-personal" class="card">
+    <h2>Personal</h2>
+    <div class="grid">
+      <label>Nombre
+        <input id="p_name" placeholder="Ej: Juan" />
+      </label>
+      <label>Apellido
+        <input id="p_last" placeholder="Ej: Pérez" />
+      </label>
+
+      <label>Sector
+        <select id="p_sector"></select>
+      </label>
+
+      <label>Zona (opcional)
+        <select id="p_zone"></select>
+      </label>
+
+      <label>Puesto (opcional)
+        <select id="p_position"></select>
+      </label>
+
+      <label>Rol (solo Parque)
+        <select id="p_roleType">
+          <option value="Fijo" selected>Fijo</option>
+          <option value="Rota">Rota</option>
+        </select>
+      </label>
+
+      <label id="p_coverZoneWrap" style="display:none">Rota: cubre Zona
+        <select id="p_coverZone"></select>
+      </label>
+
+      <label>Teléfono (opcional)
+        <input id="p_phone" placeholder="Ej: 09xxxxxxx" />
+      </label>
+
+      <label>Notas (opcional)
+        <input id="p_note" placeholder="Ej: nuevo, capacitar, etc." />
+      </label>
+    </div>
+
+    <div class="row" style="margin-top:10px">
+      <button class="btn" id="savePersonBtn">Guardar</button>
+      <button class="btn secondary" id="cancelPersonEdit" style="display:none">Cancelar edición</button>
+      <span id="personMode" class="pill">Modo: Nuevo</span>
+    </div>
+
+    <div style="margin-top:14px">
+      <table>
+        <thead>
+          <tr>
+            <th>Empleado</th><th>Sector</th><th>Zona</th><th>Puesto</th><th>Rol</th><th>Tel.</th><th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody id="peopleTbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- TURNOS -->
+  <section id="tab-turnos" class="card" style="display:none">
+    <h2>Turnos</h2>
+    <div class="grid">
+      <label>Persona
+        <select id="t_person"></select>
+      </label>
+      <label>Fecha
+        <input id="t_date" type="date" />
+      </label>
+      <label>Inicio
+        <input id="t_start" type="time" />
+      </label>
+      <label>Fin
+        <input id="t_end" type="time" />
+      </label>
+      <label>Notas (opcional)
+        <input id="t_note" placeholder="Ej: cubrir caja 12-14" />
+      </label>
+    </div>
+
+    <div class="row" style="margin-top:10px">
+      <button class="btn" id="saveShiftBtn">Guardar turno</button>
+      <button class="btn secondary" id="cancelShiftEdit" style="display:none">Cancelar edición</button>
+      <span id="shiftMode" class="pill">Modo: Nuevo</span>
+      <span class="muted">Regla: no permite turnos solapados (misma persona + mismo día).</span>
+    </div>
+
+    <div style="margin-top:14px">
+      <table>
+        <thead>
+          <tr><th>Fecha</th><th>Persona</th><th>Sector</th><th>Zona</th><th>Puesto</th><th>Horario</th><th>Notas</th><th>Acciones</th></tr>
+        </thead>
+        <tbody id="shiftsTbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- LIBRES -->
+  <section id="tab-libres" class="card" style="display:none">
+    <h2>Libres</h2>
+
+    <div class="grid">
+      <label>Persona
+        <select id="l_person"></select>
+      </label>
+
+      <label>Estado
+        <select id="l_status">
+          <option value="Pendiente">Pendiente</option>
+          <option value="Aprobado">Aprobado</option>
+        </select>
+      </label>
+
+      <label>Día
+        <input id="l_day" type="date" />
+      </label>
+
+      <label>Nota (opcional)
+        <input id="l_note" placeholder="Ej: trámite, médico" />
+      </label>
+    </div>
+
+    <div class="row" style="margin-top:10px">
+      <div>
+        <div class="muted" style="margin-bottom:6px">Tipo</div>
+        <div class="toggle">
+          <button id="btnFullDay" class="active" type="button">Día entero</button>
+          <button id="btnHalfDay" type="button">Medio horario</button>
+        </div>
+      </div>
+
+      <div id="halfDayBlock" style="display:none">
+        <div class="muted" style="margin-bottom:6px">Franja</div>
+        <div class="toggle">
+          <button id="btnMorning" class="active" type="button">Mañana</button>
+          <button id="btnAfternoon" type="button">Tarde</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:10px">
+      <button class="btn" id="saveLeaveBtn">Guardar</button>
+      <button class="btn secondary" id="cancelLeaveEdit" style="display:none">Cancelar edición</button>
+      <span id="leaveMode" class="pill">Modo: Nuevo</span>
+      <span class="muted">Permite hasta 2 por sector en el mismo día/franja (coincidencias en amarillo).</span>
+    </div>
+
+    <div style="margin-top:14px">
+      <table>
+        <thead>
+          <tr><th>Día</th><th>Persona</th><th>Sector</th><th>Tipo</th><th>Estado</th><th>Nota</th><th>Acciones</th></tr>
+        </thead>
+        <tbody id="leavesTbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- DESCANSOS 30m -->
+  <section id="tab-descansos" class="card" style="display:none">
+    <h2>Descansos 30 min (Parque)</h2>
+    <div class="muted">Regla: 1 descanso activo por zona. Cobertura por Rota asignado a esa zona. Si no hay cobertura, queda “En espera”.</div>
+
+    <div class="grid" style="margin-top:10px">
+      <label>Empleado (Parque - Fijo)
+        <select id="b_person"></select>
+      </label>
+
+      <label>Día
+        <input id="b_day" type="date" />
+      </label>
+
+      <label>Hora inicio (aprox)
+        <input id="b_start" type="time" />
+      </label>
+
+      <label>Duración
+        <input value="30 min" disabled />
+      </label>
+
+      <label>Nota (opcional)
+        <input id="b_note" placeholder="Ej: descanso, hidratación, etc." />
+      </label>
+    </div>
+
+    <div class="row" style="margin-top:10px">
+      <button class="btn" id="saveBreakBtn">Crear descanso</button>
+      <button class="btn secondary" id="cancelBreakEdit" style="display:none">Cancelar edición</button>
+      <span id="breakMode" class="pill">Modo: Nuevo</span>
+      <span class="muted">El sistema asigna automáticamente el Rota por zona.</span>
+    </div>
+
+    <div style="margin-top:14px">
+      <table>
+        <thead>
+          <tr>
+            <th>Día</th><th>Inicio</th><th>Fin</th><th>Zona</th><th>Puesto</th><th>Empleado</th><th>Cubre</th><th>Estado</th><th>Nota</th><th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody id="breaksTbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+<script>
+  /* =========================
+     CONFIG: SECTORES / ZONAS / PUESTOS
+     ========================= */
+  const CONFIG = {
+    "Recepción": {
+      zones: ["Recepción"],
+      positionsByZone: {
+        "Recepción": ["Recepción", "Caja", "Atención al cliente", "Reservas"]
+      },
+      roleTypes: ["Fijo"]
+    },
+
+    "Mantenimiento": {
+      zones: ["General", "Parque", "Camping"],
+      positionsByZone: {
+        "General": ["Mantenimiento general", "Electricidad", "Bombas/Agua", "Limpieza técnica"],
+        "Parque": ["Baños (Parque)", "Área Parque (general)", "Apoyo sector parque"],
+        "Camping": ["Zona Camping", "Baños (Camping)", "Sereno"]
+      },
+      roleTypes: ["Fijo"]
+    },
+
+    "Parque": {
+      zones: [
+        "Z1 Toboganes Altos",
+        "Z2 Gomones/Rampa",
+        "Z3 Arara",
+        "Z4 Caracol/Sapito",
+        "Z5 Piscinas",
+        "Z6 Baños",
+        "Z7 Aspira",
+        "Z8 Nuevos",
+        "Z9 Rota (equipo)"
+      ],
+      positionsByZone: {
+        "Z1 Toboganes Altos": ["Vértigo", "Pasarela 1", "Pasarela 2", "Salida rampa"],
+        "Z2 Gomones/Rampa": ["Salida Gomones", "Flotadores", "Rampa"],
+        "Z3 Arara": ["Arara 1", "Arara 2"],
+        "Z4 Caracol/Sapito": ["Caracol", "Sapito"],
+        "Z5 Piscinas": ["Piscina abierta", "Piscina climatizada"],
+        "Z6 Baños": ["Baños 1", "Baños 2"],
+        "Z7 Aspira": ["Aspira 1", "Aspira 2", "Aspira 3"],
+        "Z8 Nuevos": ["Juego nuevo 1", "Juego nuevo 2"],
+        "Z9 Rota (equipo)": ["Rota 1", "Rota 2", "Rota 3", "Rota 4"]
+      },
+      roleTypes: ["Fijo","Rota"]
+    }
+  };
+
+  const KEY = "planner_interno_v2";
+  const state = load() ?? { people: [], shifts: [], leaves: [], breaks: [] };
+
+  let editingPersonId = null;
+  let editingShiftId  = null;
+  let editingLeaveId  = null;
+  let editingBreakId  = null;
+
+  // Libres UI state
+  let leaveKind = "FULL";      // FULL | HALF
+  let leaveHalfSlot = "AM";    // AM | PM
+  const MAX_PER_SECTOR_BLOCK = 2; // permite hasta 2 (una coincidencia)
+
+  function save(){ localStorage.setItem(KEY, JSON.stringify(state)); }
+  function load(){ try { return JSON.parse(localStorage.getItem(KEY)); } catch { return null; } }
+  function uid(){ return Math.random().toString(16).slice(2) + Date.now().toString(16); }
+
+  function showMsg(text, ok=true){
+    const el = document.getElementById("msg");
+    if(!text){ el.innerHTML=""; return; }
+    el.innerHTML = `<div class="msg ${ok ? "ok" : "err"}">${text}</div>`;
+    setTimeout(()=>{ el.innerHTML=""; }, 3500);
+  }
+
+  function escapeHtml(str){
+    return (str ?? "").toString()
+      .replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;").replaceAll("'","&#039;");
+  }
+
+  /* =========================
+     FECHA HOY
+     ========================= */
+  function todayStr(){
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth()+1).padStart(2,"0");
+    const dd = String(d.getDate()).padStart(2,"0");
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  /* =========================
+     HELPERS
+     ========================= */
+  function fullName(p){ return `${p.name} ${p.lastName}`.trim(); }
+  function personById(id){ return state.people.find(p=>p.id===id); }
+
+  function personLabel(id){
+    const p = personById(id);
+    if(!p) return "—";
+    const role = (p.sector==="Parque") ? ` (${p.roleType}${p.roleType==="Rota" ? ` → ${p.coverZone||"?"}` : ""})` : "";
+    return `${fullName(p)} — ${p.sector}${role}`;
+  }
+
+  function fillSelectOptions(sel, items, keepValue=true){
+    const cur = sel.value;
+    sel.innerHTML = "";
+    items.forEach(v=>{
+      const opt = document.createElement("option");
+      opt.value = v;
+      opt.textContent = v;
+      sel.appendChild(opt);
+    });
+    if(keepValue && [...sel.options].some(o=>o.value===cur)) sel.value = cur;
+  }
+
+  function sectorList(){ return Object.keys(CONFIG); }
+
+  function zonesForSector(sector){
+    return CONFIG[sector]?.zones ?? [];
+  }
+
+  function positionsFor(sector, zone){
+    const m = CONFIG[sector]?.positionsByZone ?? {};
+    return m[zone] ?? [];
+  }
+
+  function roleTypesForSector(sector){
+    return CONFIG[sector]?.roleTypes ?? ["Fijo"];
+  }
+
+  function updatePersonSelectors(){
+    const sector = document.getElementById("p_sector").value;
+    const zoneSel = document.getElementById("p_zone");
+    const posSel  = document.getElementById("p_position");
+    const roleSel = document.getElementById("p_roleType");
+
+    fillSelectOptions(roleSel, roleTypesForSector(sector), true);
+
+    const zones = zonesForSector(sector);
+    fillSelectOptions(zoneSel, zones.length ? zones : [""], true);
+    if(!zoneSel.value && zones.length) zoneSel.value = zones[0];
+
+    const positions = positionsFor(sector, zoneSel.value);
+    fillSelectOptions(posSel, positions.length ? positions : [""], true);
+    if(!posSel.value && positions.length) posSel.value = positions[0];
+
+    const isParque = sector === "Parque";
+    const roleType = roleSel.value;
+
+    document.getElementById("p_coverZoneWrap").style.display = (isParque && roleType==="Rota") ? "" : "none";
+
+    if(isParque && roleType==="Rota"){
+      const coverZones = zonesForSector("Parque").filter(z=>!z.startsWith("Z9"));
+      fillSelectOptions(document.getElementById("p_coverZone"), coverZones, true);
+      if(!document.getElementById("p_coverZone").value && coverZones.length){
+        document.getElementById("p_coverZone").value = coverZones[0];
+      }
+      zoneSel.value = "Z9 Rota (equipo)";
+      fillSelectOptions(posSel, positionsFor("Parque","Z9 Rota (equipo)"), true);
+      if(!posSel.value) posSel.value = "Rota 1";
+    } else {
+      document.getElementById("p_coverZone").value = "";
+      if(isParque && zoneSel.value === "Z9 Rota (equipo)"){
+        const first = zonesForSector("Parque").find(z=>!z.startsWith("Z9")) || zonesForSector("Parque")[0];
+        zoneSel.value = first;
+        fillSelectOptions(posSel, positionsFor("Parque", first), false);
+      }
+    }
+  }
+
+  function updatePersonPositionsFromZone(){
+    const sector = document.getElementById("p_sector").value;
+    const zone = document.getElementById("p_zone").value;
+    const posSel = document.getElementById("p_position");
+    const positions = positionsFor(sector, zone);
+    fillSelectOptions(posSel, positions.length ? positions : [""], false);
+  }
+
+  function fillPeopleSelect(selectId, filterFn=null, allowEmpty=false){
+    const sel = document.getElementById(selectId);
+    const cur = sel.value;
+    sel.innerHTML = allowEmpty ? `<option value="">(Sin asignar)</option>` : "";
+    state.people
+      .filter(p => filterFn ? filterFn(p) : true)
+      .forEach(p=>{
+        const opt = document.createElement("option");
+        opt.value = p.id;
+        opt.textContent = `${fullName(p)} — ${p.sector}${p.sector==="Parque" ? ` (${p.roleType})` : ""}`;
+        sel.appendChild(opt);
+      });
+    if([...sel.options].some(o=>o.value===cur)) sel.value = cur;
+  }
+
+  /* =========================
+     TURNOS (overlap)
+     ========================= */
+  function timeToMin(t){ const [h,m]=t.split(":").map(Number); return h*60+m; }
+  function minToTime(min){
+    const h = Math.floor(min/60).toString().padStart(2,"0");
+    const m = (min%60).toString().padStart(2,"0");
+    return `${h}:${m}`;
+  }
+  function overlaps(aStart, aEnd, bStart, bEnd){ return Math.max(aStart,bStart) < Math.min(aEnd,bEnd); }
+
+  function hasShiftOverlap(personId, date, start, end, ignoreShiftId=null){
+    const s1 = timeToMin(start), e1 = timeToMin(end);
+    return state.shifts.some(s=>{
+      if(ignoreShiftId && s.id===ignoreShiftId) return false;
+      if(s.personId!==personId || s.date!==date) return false;
+      const s2=timeToMin(s.start), e2=timeToMin(s.end);
+      return overlaps(s1,e1,s2,e2);
+    });
+  }
+
+  /* =========================
+     LIBRES
+     ========================= */
+  function leaveBlocks(kind, slot){
+    if(kind === "FULL") return ["AM","PM"];
+    return [slot];
+  }
+
+  function validateLeave(personId, sector, day, kind, slot, ignoreLeaveId=null){
+    const blocks = leaveBlocks(kind, slot);
+
+    for(const l of state.leaves){
+      if(ignoreLeaveId && l.id===ignoreLeaveId) continue;
+      if(l.day !== day) continue;
+      if(l.personId !== personId) continue;
+
+      const existingBlocks = leaveBlocks(l.kind, l.halfSlot);
+      if(existingBlocks.some(b => blocks.includes(b))){
+        return { ok:false, reason:"Esa persona ya tiene libre/medio en ese día/franja." };
+      }
+    }
+
+    for(const block of blocks){
+      let count = 0;
+      for(const l of state.leaves){
+        if(ignoreLeaveId && l.id===ignoreLeaveId) continue;
+        if(l.day !== day) continue;
+        if(l.sector !== sector) continue;
+
+        const existingBlocks = leaveBlocks(l.kind, l.halfSlot);
+        if(existingBlocks.includes(block)) count++;
+      }
+      if(count >= MAX_PER_SECTOR_BLOCK){
+        return { ok:false, reason:`En ${sector}, ya hay ${MAX_PER_SECTOR_BLOCK} libres/medios para ese día/franja.` };
+      }
+    }
+
+    return { ok:true };
+  }
+
+  function buildLeaveCoincidenceMap(){
+    const map = new Map();
+    for(const l of state.leaves){
+      const blocks = leaveBlocks(l.kind, l.halfSlot);
+      for(const b of blocks){
+        const key = `${l.sector}|${l.day}|${b}`;
+        map.set(key, (map.get(key) || 0) + 1);
+      }
+    }
+    return map;
+  }
+
+  function leaveTypeLabel(l){
+    if(l.kind === "FULL") return "Día entero";
+    return l.halfSlot === "AM" ? "Medio (Mañana)" : "Medio (Tarde)";
+  }
+
+  /* =========================
+     DESCANSOS 30m (Parque)
+     ========================= */
+  function pickRotaForZone(coverZone, day, start, end, ignoreBreakId=null){
+    const candidates = state.people.filter(p =>
+      p.sector==="Parque" && p.roleType==="Rota" && (p.coverZone||"")===coverZone
+    );
+    const s1 = timeToMin(start), e1 = timeToMin(end);
+
+    for(const rota of candidates){
+      const busy = state.breaks.some(b=>{
+        if(ignoreBreakId && b.id===ignoreBreakId) return false;
+        if(b.day !== day) return false;
+        if(b.status !== "Activo") return false;
+        if(b.rotaId !== rota.id) return false;
+        const s2=timeToMin(b.start), e2=timeToMin(b.end);
+        return overlaps(s1,e1,s2,e2);
+      });
+      if(!busy) return rota;
+    }
+    return null;
+  }
+
+  function zoneHasActiveBreak(day, zone, start, end, ignoreBreakId=null){
+    const s1 = timeToMin(start), e1 = timeToMin(end);
+    return state.breaks.some(b=>{
+      if(ignoreBreakId && b.id===ignoreBreakId) return false;
+      if(b.day !== day) return false;
+      if(b.status !== "Activo") return false;
+      if(b.zone !== zone) return false;
+      const s2=timeToMin(b.start), e2=timeToMin(b.end);
+      return overlaps(s1,e1,s2,e2);
+    });
+  }
+
+  function computeBreakEnd(start){
+    return minToTime(timeToMin(start) + 30);
+  }
+
+  function roundUpTo5Min(date){
+    const ms = 5 * 60 * 1000;
+    return new Date(Math.ceil(date.getTime()/ms)*ms);
+  }
+
+  function suggestBreakStart(){
+    const input = document.getElementById("b_start");
+    if(!input) return;
+
+    const dayInput = document.getElementById("b_day");
+    if(dayInput && !dayInput.value) dayInput.value = todayStr();
+
+    const now = new Date();
+    const min = new Date();
+    min.setHours(11,30,0,0);
+
+    let proposed = roundUpTo5Min(now);
+    if(proposed < min) proposed = min;
+
+    const hh = String(proposed.getHours()).padStart(2,"0");
+    const mm = String(proposed.getMinutes()).padStart(2,"0");
+
+    if(!input.value) input.value = `${hh}:${mm}`;
+  }
+
+  /* =========================
+     RENDER
+     ========================= */
+  function renderPeople(){
+    const tb = document.getElementById("peopleTbody");
+    tb.innerHTML = "";
+    state.people.forEach(p=>{
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><b>${escapeHtml(fullName(p))}</b></td>
+        <td><span class="pill">${escapeHtml(p.sector)}</span></td>
+        <td>${escapeHtml(p.zone || "—")}</td>
+        <td>${escapeHtml(p.position || "—")}</td>
+        <td>${escapeHtml(p.sector==="Parque" ? (p.roleType + (p.roleType==="Rota" ? ` → ${p.coverZone||"—"}` : "")) : "Fijo")}</td>
+        <td>${escapeHtml(p.phone || "—")}</td>
+        <td class="split">
+          <button class="btn secondary small" data-edit-person="${p.id}">Editar</button>
+          <button class="btn danger small" data-del-person="${p.id}">Eliminar</button>
+        </td>
+      `;
+      tb.appendChild(tr);
+    });
+  }
+
+  function renderShifts(){
+    const tb = document.getElementById("shiftsTbody");
+    tb.innerHTML = "";
+    const sorted = [...state.shifts].sort((a,b)=> (a.date+a.start).localeCompare(b.date+b.start));
+    sorted.forEach(s=>{
+      const p = personById(s.personId);
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${s.date}</td>
+        <td>${escapeHtml(personLabel(s.personId))}</td>
+        <td><span class="pill">${escapeHtml(p?.sector || "—")}</span></td>
+        <td>${escapeHtml(p?.zone || "—")}</td>
+        <td>${escapeHtml(p?.position || "—")}</td>
+        <td>${s.start} - ${s.end}</td>
+        <td>${escapeHtml(s.note || "—")}</td>
+        <td class="split">
+          <button class="btn secondary small" data-edit-shift="${s.id}">Editar</button>
+          <button class="btn danger small" data-del-shift="${s.id}">Eliminar</button>
+        </td>
+      `;
+      tb.appendChild(tr);
+    });
+  }
+
+  function renderLeaves(){
+    const tb = document.getElementById("leavesTbody");
+    tb.innerHTML = "";
+    const coincidenceMap = buildLeaveCoincidenceMap();
+    const sorted = [...state.leaves].sort((a,b)=> (a.day).localeCompare(b.day));
+
+    sorted.forEach(l=>{
+      const blocks = leaveBlocks(l.kind, l.halfSlot);
+      const isWarn = blocks.some(b => (coincidenceMap.get(`${l.sector}|${l.day}|${b}`) || 0) >= 2);
+
+      const tr = document.createElement("tr");
+      if(isWarn) tr.classList.add("warn");
+      tr.innerHTML = `
+        <td>${l.day}</td>
+        <td>${escapeHtml(personLabel(l.personId))}</td>
+        <td><span class="pill">${escapeHtml(l.sector)}</span></td>
+        <td><span class="pill">${leaveTypeLabel(l)}</span></td>
+        <td><span class="pill">${escapeHtml(l.status)}</span></td>
+        <td>${escapeHtml(l.note || "—")}</td>
+        <td class="split">
+          <button class="btn secondary small" data-edit-leave="${l.id}">Editar</button>
+          <button class="btn danger small" data-del-leave="${l.id}">Eliminar</button>
+        </td>
+      `;
+      tb.appendChild(tr);
+    });
+  }
+
+  function renderBreaks(){
+    const tb = document.getElementById("breaksTbody");
+    tb.innerHTML = "";
+    const sorted = [...state.breaks].sort((a,b)=> (a.day+a.start).localeCompare(b.day+b.start));
+
+    sorted.forEach(b=>{
+      const tr = document.createElement("tr");
+      if(b.status==="En espera") tr.classList.add("wait");
+      tr.innerHTML = `
+        <td>${b.day}</td>
+        <td>${b.start}</td>
+        <td>${b.end}</td>
+        <td>${escapeHtml(b.zone)}</td>
+        <td>${escapeHtml(b.position)}</td>
+        <td>${escapeHtml(personLabel(b.personId))}</td>
+        <td>${b.rotaId ? escapeHtml(personLabel(b.rotaId)) : "<span class='pill'>Sin cobertura</span>"}</td>
+        <td><span class="pill">${escapeHtml(b.status)}</span></td>
+        <td>${escapeHtml(b.note || "—")}</td>
+        <td class="split">
+          <button class="btn secondary small" data-edit-break="${b.id}">Editar</button>
+          ${b.status==="En espera" ? `<button class="btn small" data-activate-break="${b.id}">Activar</button>` : ""}
+          ${b.status==="Activo" ? `<button class="btn small" data-finish-break="${b.id}">Finalizar</button>` : ""}
+          <button class="btn danger small" data-del-break="${b.id}">Eliminar</button>
+        </td>
+      `;
+      tb.appendChild(tr);
+    });
+  }
+
+  function renderToday(){
+    const day = todayStr();
+
+    // Turnos
+    const sTb = document.getElementById("todayShiftsTbody");
+    sTb.innerHTML = "";
+    const shifts = state.shifts.filter(s => s.date === day).sort((a,b)=> a.start.localeCompare(b.start));
+    sTb.innerHTML = shifts.length ? "" : `<tr><td colspan="6" class="muted">Sin turnos cargados para hoy.</td></tr>`;
+    shifts.forEach(s=>{
+      const p = personById(s.personId);
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><b>${escapeHtml(p ? fullName(p) : "")}</b></td>
+        <td>${escapeHtml(p?.sector || "")}</td>
+        <td>${escapeHtml(p?.zone || "")}</td>
+        <td>${escapeHtml(p?.position || "")}</td>
+        <td>${s.start} - ${s.end}</td>
+        <td>${escapeHtml(s.note || "")}</td>
+      `;
+      sTb.appendChild(tr);
+    });
+
+    // Libres
+    const lTb = document.getElementById("todayLeavesTbody");
+    lTb.innerHTML = "";
+    const leaves = state.leaves.filter(l => l.day === day);
+    lTb.innerHTML = leaves.length ? "" : `<tr><td colspan="5" class="muted">Sin libres cargados para hoy.</td></tr>`;
+    leaves.forEach(l=>{
+      const p = personById(l.personId);
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><b>${escapeHtml(p ? fullName(p) : "")}</b></td>
+        <td>${escapeHtml(l.sector)}</td>
+        <td>${escapeHtml(leaveTypeLabel(l))}</td>
+        <td>${escapeHtml(l.status)}</td>
+        <td>${escapeHtml(l.note || "")}</td>
+      `;
+      lTb.appendChild(tr);
+    });
+
+    // Descansos
+    const bTb = document.getElementById("todayBreaksTbody");
+    bTb.innerHTML = "";
+    const breaks = state.breaks.filter(b => b.day === day).sort((a,b)=> a.start.localeCompare(b.start));
+    bTb.innerHTML = breaks.length ? "" : `<tr><td colspan="7" class="muted">Sin descansos cargados para hoy.</td></tr>`;
+    breaks.forEach(b=>{
+      const emp = personById(b.personId);
+      const rota = b.rotaId ? personById(b.rotaId) : null;
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${b.start}</td>
+        <td>${b.end}</td>
+        <td>${escapeHtml(b.zone)}</td>
+        <td>${escapeHtml(b.position)}</td>
+        <td>${escapeHtml(emp ? fullName(emp) : "")}</td>
+        <td>${escapeHtml(rota ? fullName(rota) : "")}</td>
+        <td>${escapeHtml(b.status)}</td>
+      `;
+      bTb.appendChild(tr);
+    });
+  }
+
+  function renderAll(){
+    fillPeopleSelect("t_person", null, false);
+    fillPeopleSelect("l_person", null, false);
+    fillPeopleSelect("b_person", p => p.sector==="Parque" && p.roleType==="Fijo", false);
+
+    renderPeople();
+    renderShifts();
+    renderLeaves();
+    renderBreaks();
+    renderEmployeeSearch();
+    renderToday();
+  }
+
+  /* =========================
+     TABS
+     ========================= */
+  document.querySelectorAll(".tabs button[data-tab]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      document.querySelectorAll(".tabs button[data-tab]").forEach(b=>b.classList.remove("active"));
+      btn.classList.add("active");
+      const tab = btn.dataset.tab;
+
+      ["hoy","personal","turnos","libres","descansos"].forEach(t=>{
+        document.getElementById(`tab-${t}`).style.display = (t===tab) ? "" : "none";
+      });
+
+      renderAll();
+      if(tab === "descansos") suggestBreakStart();
+      if(tab === "hoy") renderToday();
+    });
+  });
+
+  /* =========================
+     PERSONAL FORM
+     ========================= */
+  function setPersonMode(editing){
+    document.getElementById("personMode").textContent = `Modo: ${editing ? "Editar" : "Nuevo"}`;
+    document.getElementById("cancelPersonEdit").style.display = editing ? "" : "none";
+    document.getElementById("savePersonBtn").textContent = editing ? "Actualizar" : "Guardar";
+  }
+
+  function resetPersonForm(){
+    editingPersonId = null;
+    document.getElementById("p_name").value = "";
+    document.getElementById("p_last").value = "";
+    document.getElementById("p_phone").value = "";
+    document.getElementById("p_note").value = "";
+    document.getElementById("p_sector").value = "Mantenimiento";
+    updatePersonSelectors();
+    setPersonMode(false);
+  }
+
+  document.getElementById("cancelPersonEdit").addEventListener("click", resetPersonForm);
+  document.getElementById("p_sector").addEventListener("change", updatePersonSelectors);
+  document.getElementById("p_zone").addEventListener("change", updatePersonPositionsFromZone);
+  document.getElementById("p_roleType").addEventListener("change", updatePersonSelectors);
+
+  document.getElementById("savePersonBtn").addEventListener("click", ()=>{
+    const name = document.getElementById("p_name").value.trim();
+    const lastName = document.getElementById("p_last").value.trim();
+    const sector = document.getElementById("p_sector").value;
+    const zone = document.getElementById("p_zone").value || "";
+    const position = document.getElementById("p_position").value || "";
+    const roleType = (sector==="Parque") ? document.getElementById("p_roleType").value : "Fijo";
+    const coverZone = (sector==="Parque" && roleType==="Rota") ? document.getElementById("p_coverZone").value : "";
+    const phone = document.getElementById("p_phone").value.trim();
+    const note = document.getElementById("p_note").value.trim();
+
+    if(!name || !lastName) return showMsg("Falta nombre y/o apellido.", false);
+
+    if(editingPersonId){
+      const p = personById(editingPersonId);
+      if(!p) return showMsg("No encontré la persona a editar.", false);
+
+      p.name = name; p.lastName = lastName; p.sector = sector;
+      p.zone = zone; p.position = position;
+      p.roleType = roleType; p.coverZone = coverZone;
+      p.phone = phone; p.note = note;
+
+      save(); renderAll(); resetPersonForm();
+      showMsg("Empleado actualizado ✅");
+    } else {
+      state.people.push({
+        id: uid(),
+        name, lastName, sector,
+        zone, position,
+        roleType, coverZone,
+        phone, note
+      });
+      save(); renderAll(); resetPersonForm();
+      showMsg("Empleado agregado ✅");
+    }
+  });
+
+  /* =========================
+     TURNOS FORM
+     ========================= */
+  function setShiftMode(editing){
+    document.getElementById("shiftMode").textContent = `Modo: ${editing ? "Editar" : "Nuevo"}`;
+    document.getElementById("cancelShiftEdit").style.display = editing ? "" : "none";
+    document.getElementById("saveShiftBtn").textContent = editing ? "Actualizar turno" : "Guardar turno";
+  }
+
+  function resetShiftForm(){
+    editingShiftId = null;
+    document.getElementById("t_date").value = "";
+    document.getElementById("t_start").value = "";
+    document.getElementById("t_end").value = "";
+    document.getElementById("t_note").value = "";
+    setShiftMode(false);
+  }
+
+  document.getElementById("cancelShiftEdit").addEventListener("click", resetShiftForm);
+
+  document.getElementById("saveShiftBtn").addEventListener("click", ()=>{
+    const personId = document.getElementById("t_person").value;
+    const date = document.getElementById("t_date").value;
+    const start = document.getElementById("t_start").value;
+    const end = document.getElementById("t_end").value;
+    const note = document.getElementById("t_note").value.trim();
+
+    if(!personId) return showMsg("Elegí una persona.", false);
+    if(!date || !start || !end) return showMsg("Faltan fecha y horas.", false);
+    if(timeToMin(end) <= timeToMin(start)) return showMsg("La hora fin debe ser mayor a inicio.", false);
+    if(hasShiftOverlap(personId, date, start, end, editingShiftId)) return showMsg("Se solapa con otro turno de esa persona.", false);
+
+    if(editingShiftId){
+      const s = state.shifts.find(x=>x.id===editingShiftId);
+      if(!s) return showMsg("No encontré el turno a editar.", false);
+      s.personId = personId; s.date = date; s.start = start; s.end = end; s.note = note;
+      save(); renderAll(); resetShiftForm();
+      showMsg("Turno actualizado ✅");
+    } else {
+      state.shifts.push({ id: uid(), personId, date, start, end, note });
+      save(); renderAll(); resetShiftForm();
+      showMsg("Turno agregado ✅");
+    }
+  });
+
+  /* =========================
+     LIBRES FORM
+     ========================= */
+  function setLeaveMode(editing){
+    document.getElementById("leaveMode").textContent = `Modo: ${editing ? "Editar" : "Nuevo"}`;
+    document.getElementById("cancelLeaveEdit").style.display = editing ? "" : "none";
+    document.getElementById("saveLeaveBtn").textContent = editing ? "Actualizar" : "Guardar";
+  }
+
+  function syncLeaveUI(){
+    document.getElementById("btnFullDay").classList.toggle("active", leaveKind==="FULL");
+    document.getElementById("btnHalfDay").classList.toggle("active", leaveKind==="HALF");
+    document.getElementById("halfDayBlock").style.display = leaveKind==="HALF" ? "" : "none";
+    document.getElementById("btnMorning").classList.toggle("active", leaveHalfSlot==="AM");
+    document.getElementById("btnAfternoon").classList.toggle("active", leaveHalfSlot==="PM");
+  }
+
+  document.getElementById("btnFullDay").addEventListener("click", ()=>{ leaveKind="FULL"; syncLeaveUI(); });
+  document.getElementById("btnHalfDay").addEventListener("click", ()=>{ leaveKind="HALF"; syncLeaveUI(); });
+  document.getElementById("btnMorning").addEventListener("click", ()=>{ leaveHalfSlot="AM"; syncLeaveUI(); });
+  document.getElementById("btnAfternoon").addEventListener("click", ()=>{ leaveHalfSlot="PM"; syncLeaveUI(); });
+
+  function resetLeaveForm(){
+    editingLeaveId = null;
+    document.getElementById("l_day").value = "";
+    document.getElementById("l_note").value = "";
+    document.getElementById("l_status").value = "Pendiente";
+    leaveKind = "FULL";
+    leaveHalfSlot = "AM";
+    syncLeaveUI();
+    setLeaveMode(false);
+  }
+
+  document.getElementById("cancelLeaveEdit").addEventListener("click", resetLeaveForm);
+
+  document.getElementById("saveLeaveBtn").addEventListener("click", ()=>{
+    const personId = document.getElementById("l_person").value;
+    const status = document.getElementById("l_status").value;
+    const day = document.getElementById("l_day").value;
+    const note = document.getElementById("l_note").value.trim();
+
+    if(!personId) return showMsg("Elegí una persona.", false);
+    if(!day) return showMsg("Elegí un día.", false);
+
+    const p = personById(personId);
+    if(!p) return showMsg("No encontré a la persona.", false);
+
+    const sector = p.sector;
+    const kind = leaveKind;
+    const halfSlot = (kind==="HALF") ? leaveHalfSlot : "";
+
+    const validation = validateLeave(personId, sector, day, kind, leaveHalfSlot, editingLeaveId);
+    if(!validation.ok) return showMsg(validation.reason, false);
+
+    if(editingLeaveId){
+      const l = state.leaves.find(x=>x.id===editingLeaveId);
+      if(!l) return showMsg("No encontré el registro a editar.", false);
+      l.personId = personId; l.sector = sector; l.day = day;
+      l.kind = kind; l.halfSlot = halfSlot; l.status = status; l.note = note;
+      save(); renderAll(); resetLeaveForm();
+      showMsg("Libre actualizado ✅");
+    } else {
+      state.leaves.push({ id: uid(), personId, sector, day, kind, halfSlot, status, note });
+      save(); renderAll(); resetLeaveForm();
+      showMsg("Libre agregado ✅");
+    }
+  });
+
+  /* =========================
+     DESCANSOS FORM
+     ========================= */
+  function setBreakMode(editing){
+    document.getElementById("breakMode").textContent = `Modo: ${editing ? "Editar" : "Nuevo"}`;
+    document.getElementById("cancelBreakEdit").style.display = editing ? "" : "none";
+    document.getElementById("saveBreakBtn").textContent = editing ? "Actualizar" : "Crear descanso";
+  }
+
+  function resetBreakForm(){
+    editingBreakId = null;
+    document.getElementById("b_day").value = todayStr();
+    document.getElementById("b_start").value = "";
+    document.getElementById("b_note").value = "";
+    setBreakMode(false);
+    suggestBreakStart();
+  }
+
+  document.getElementById("cancelBreakEdit").addEventListener("click", resetBreakForm);
+
+  document.getElementById("saveBreakBtn").addEventListener("click", ()=>{
+    const personId = document.getElementById("b_person").value;
+    const day = document.getElementById("b_day").value;
+    const start = document.getElementById("b_start").value;
+    const note = document.getElementById("b_note").value.trim();
+
+    if(!personId) return showMsg("Elegí un empleado del Parque (Fijo).", false);
+    if(!day || !start) return showMsg("Falta día y hora de inicio.", false);
+
+    const p = personById(personId);
+    if(!p || p.sector!=="Parque" || p.roleType!=="Fijo") return showMsg("El empleado debe ser Parque y Fijo.", false);
+
+    const zone = p.zone || "—";
+    const position = p.position || "—";
+    const end = computeBreakEnd(start);
+
+    if(zoneHasActiveBreak(day, zone, start, end, editingBreakId)){
+      if(editingBreakId){
+        const b = state.breaks.find(x=>x.id===editingBreakId);
+        if(!b) return showMsg("No encontré el descanso a editar.", false);
+        b.personId = personId; b.day = day; b.start = start; b.end = end;
+        b.zone = zone; b.position = position;
+        b.note = note; b.status = "En espera"; b.rotaId = "";
+        save(); renderAll(); resetBreakForm();
+        showMsg("Descanso actualizado (En espera) ✅");
+      } else {
+        state.breaks.push({ id: uid(), personId, day, start, end, zone, position, rotaId:"", status:"En espera", note });
+        save(); renderAll(); resetBreakForm();
+        showMsg("Descanso creado (En espera: ya hay uno activo en esa zona). ✅");
+      }
+      return;
+    }
+
+    const rota = pickRotaForZone(zone, day, start, end, editingBreakId);
+    if(!rota){
+      if(editingBreakId){
+        const b = state.breaks.find(x=>x.id===editingBreakId);
+        if(!b) return showMsg("No encontré el descanso a editar.", false);
+        b.personId = personId; b.day = day; b.start = start; b.end = end;
+        b.zone = zone; b.position = position;
+        b.note = note; b.status = "En espera"; b.rotaId = "";
+        save(); renderAll(); resetBreakForm();
+        showMsg("Descanso actualizado (En espera: sin Rota disponible). ✅");
+      } else {
+        state.breaks.push({ id: uid(), personId, day, start, end, zone, position, rotaId:"", status:"En espera", note });
+        save(); renderAll(); resetBreakForm();
+        showMsg("Descanso creado (En espera: sin Rota disponible). ✅");
+      }
+      return;
+    }
+
+    if(editingBreakId){
+      const b = state.breaks.find(x=>x.id===editingBreakId);
+      if(!b) return showMsg("No encontré el descanso a editar.", false);
+      b.personId = personId; b.day = day; b.start = start; b.end = end;
+      b.zone = zone; b.position = position;
+      b.rotaId = rota.id; b.status = "Activo"; b.note = note;
+      save(); renderAll(); resetBreakForm();
+      showMsg("Descanso actualizado (Activo) ✅");
+    } else {
+      state.breaks.push({ id: uid(), personId, day, start, end, zone, position, rotaId: rota.id, status:"Activo", note });
+      save(); renderAll(); resetBreakForm();
+      showMsg(`Descanso activo ✅ (cubre: ${fullName(rota)})`);
+    }
+  });
+
+  /* =========================
+     CLICK ACTIONS
+     ========================= */
+  document.body.addEventListener("click", (e)=>{
+    const delP = e.target.dataset.delPerson;
+    const editP = e.target.dataset.editPerson;
+
+    const delS = e.target.dataset.delShift;
+    const editS = e.target.dataset.editShift;
+
+    const delL = e.target.dataset.delLeave;
+    const editL = e.target.dataset.editLeave;
+
+    const delB = e.target.dataset.delBreak;
+    const editB = e.target.dataset.editBreak;
+    const activateB = e.target.dataset.activateBreak;
+    const finishB = e.target.dataset.finishBreak;
+
+    if(delP){
+      if(!confirm("¿Eliminar empleado y sus datos asociados?")) return;
+      state.people = state.people.filter(p=>p.id!==delP);
+      state.shifts = state.shifts.filter(s=>s.personId!==delP);
+      state.leaves = state.leaves.filter(l=>l.personId!==delP);
+      state.breaks = state.breaks.filter(b=>b.personId!==delP && b.rotaId!==delP);
+      save(); renderAll();
+      if(editingPersonId===delP) resetPersonForm();
+      showMsg("Empleado eliminado.");
+    }
+
+    if(editP){
+      const p = personById(editP);
+      if(!p) return;
+      editingPersonId = p.id;
+
+      document.getElementById("p_name").value = p.name;
+      document.getElementById("p_last").value = p.lastName;
+      document.getElementById("p_phone").value = p.phone || "";
+      document.getElementById("p_note").value = p.note || "";
+
+      document.getElementById("p_sector").value = p.sector;
+      updatePersonSelectors();
+
+      document.getElementById("p_roleType").value = (p.sector==="Parque") ? (p.roleType || "Fijo") : "Fijo";
+      updatePersonSelectors();
+
+      document.getElementById("p_zone").value = p.zone || document.getElementById("p_zone").value;
+      updatePersonPositionsFromZone();
+
+      document.getElementById("p_position").value = p.position || document.getElementById("p_position").value;
+
+      if(p.sector==="Parque" && p.roleType==="Rota"){
+        document.getElementById("p_coverZone").value = p.coverZone || document.getElementById("p_coverZone").value;
+      }
+
+      setPersonMode(true);
+      showMsg("Editando empleado…");
+    }
+
+    if(delS){
+      if(!confirm("¿Eliminar turno?")) return;
+      state.shifts = state.shifts.filter(s=>s.id!==delS);
+      save(); renderAll();
+      if(editingShiftId===delS) resetShiftForm();
+      showMsg("Turno eliminado.");
+    }
+
+    if(editS){
+      const s = state.shifts.find(x=>x.id===editS);
+      if(!s) return;
+      editingShiftId = s.id;
+      document.getElementById("t_person").value = s.personId;
+      document.getElementById("t_date").value = s.date;
+      document.getElementById("t_start").value = s.start;
+      document.getElementById("t_end").value = s.end;
+      document.getElementById("t_note").value = s.note || "";
+      setShiftMode(true);
+      showMsg("Editando turno…");
+    }
+
+    if(delL){
+      if(!confirm("¿Eliminar libre/medio?")) return;
+      state.leaves = state.leaves.filter(l=>l.id!==delL);
+      save(); renderAll();
+      if(editingLeaveId===delL) resetLeaveForm();
+      showMsg("Registro eliminado.");
+    }
+
+    if(editL){
+      const l = state.leaves.find(x=>x.id===editL);
+      if(!l) return;
+      editingLeaveId = l.id;
+
+      document.getElementById("l_person").value = l.personId;
+      document.getElementById("l_status").value = l.status;
+      document.getElementById("l_day").value = l.day;
+      document.getElementById("l_note").value = l.note || "";
+
+      leaveKind = l.kind || "FULL";
+      leaveHalfSlot = (l.halfSlot === "PM") ? "PM" : "AM";
+      syncLeaveUI();
+
+      setLeaveMode(true);
+      showMsg("Editando libre…");
+    }
+
+    if(delB){
+      if(!confirm("¿Eliminar descanso?")) return;
+      state.breaks = state.breaks.filter(b=>b.id!==delB);
+      save(); renderAll();
+      if(editingBreakId===delB) resetBreakForm();
+      showMsg("Descanso eliminado.");
+    }
+
+    if(editB){
+      const b = state.breaks.find(x=>x.id===editB);
+      if(!b) return;
+      editingBreakId = b.id;
+
+      document.getElementById("b_person").value = b.personId;
+      document.getElementById("b_day").value = b.day;
+      document.getElementById("b_start").value = b.start;
+      document.getElementById("b_note").value = b.note || "";
+
+      setBreakMode(true);
+      showMsg("Editando descanso…");
+    }
+
+    if(activateB){
+      const b = state.breaks.find(x=>x.id===activateB);
+      if(!b) return;
+
+      if(zoneHasActiveBreak(b.day, b.zone, b.start, b.end, b.id)){
+        return showMsg("No se puede activar: ya hay un descanso activo en esa zona.", false);
+      }
+
+      const rota = pickRotaForZone(b.zone, b.day, b.start, b.end, b.id);
+      if(!rota){
+        return showMsg("No se puede activar: no hay Rota disponible para esa zona.", false);
+      }
+
+      b.rotaId = rota.id;
+      b.status = "Activo";
+      save(); renderAll();
+      showMsg(`Activado ✅ (cubre: ${fullName(rota)})`);
+    }
+
+    if(finishB){
+      const b = state.breaks.find(x=>x.id===finishB);
+      if(!b) return;
+      b.status = "Finalizado";
+      save(); renderAll();
+      showMsg("Finalizado ✅");
+    }
+  });
+
+  /* =========================
+     SEARCH EMPLOYEE
+     ========================= */
+  function renderEmployeeSearch(){
+    const q = document.getElementById("empSearch").value.trim().toLowerCase();
+    const box = document.getElementById("empResults");
+    if(!q){ box.style.display="none"; box.innerHTML=""; return; }
+
+    const matches = state.people.filter(p => `${p.name} ${p.lastName}`.toLowerCase().includes(q));
+
+    if(matches.length===0){
+      box.style.display = "";
+      box.innerHTML = `<b>No hay resultados</b> para “${escapeHtml(q)}”.`;
+      return;
+    }
+
+    if(matches.length===1){
+      box.style.display = "";
+      box.innerHTML = employeeCard(matches[0]);
+      return;
+    }
+
+    box.style.display = "";
+    box.innerHTML = `
+      <b>Resultados (${matches.length})</b><br/>
+      ${matches.map(p=>`<div style="margin-top:8px">
+        <button class="btn secondary small" data-open-emp="${p.id}">Ver: ${escapeHtml(fullName(p))}</button>
+      </div>`).join("")}
+    `;
+  }
+
+  function employeeCard(p){
+    const shifts = state.shifts.filter(s=>s.personId===p.id).sort((a,b)=>(a.date+a.start).localeCompare(b.date+b.start));
+    const leaves = state.leaves.filter(l=>l.personId===p.id).sort((a,b)=>a.day.localeCompare(b.day));
+    const breaks = state.breaks.filter(b=>b.personId===p.id || b.rotaId===p.id).sort((a,b)=>(a.day+a.start).localeCompare(b.day+b.start));
+
+    return `
+      <div>
+        <div class="row">
+          <div><b>${escapeHtml(fullName(p))}</b> <span class="pill">${escapeHtml(p.sector)}</span></div>
+          <div class="muted">${escapeHtml(p.zone || "")} ${p.position ? "— " + escapeHtml(p.position) : ""}</div>
+          ${p.sector==="Parque" ? `<div class="pill">${escapeHtml(p.roleType)}${p.roleType==="Rota" ? ` → ${escapeHtml(p.coverZone||"")}` : ""}</div>` : ""}
+        </div>
+
+        <div style="margin-top:10px" class="grid">
+          <div class="subcard">
+            <b>Turnos</b>
+            ${shifts.length ? `<ul>${shifts.map(s=>`<li>${s.date} — ${s.start}-${s.end} ${s.note?`<span class="muted">(${escapeHtml(s.note)})</span>`:""}</li>`).join("")}</ul>` : `<div class="muted">Sin turnos.</div>`}
+          </div>
+          <div class="subcard">
+            <b>Libres</b>
+            ${leaves.length ? `<ul>${leaves.map(l=>`<li>${l.day} — <span class="pill">${leaveTypeLabel(l)}</span> <span class="pill">${escapeHtml(l.status)}</span> ${l.note?`<span class="muted">(${escapeHtml(l.note)})</span>`:""}</li>`).join("")}</ul>` : `<div class="muted">Sin libres.</div>`}
+          </div>
+          <div class="subcard" style="grid-column: 1 / -1;">
+            <b>Descansos (Parque)</b>
+            ${breaks.length ? `<ul>${breaks.map(b=>`<li>${b.day} ${b.start}-${b.end} — <span class="pill">${escapeHtml(b.status)}</span> Zona: ${escapeHtml(b.zone)} | Emp: ${escapeHtml(personLabel(b.personId))} | Cubre: ${b.rotaId?escapeHtml(personLabel(b.rotaId)):"—"}</li>`).join("")}</ul>` : `<div class="muted">Sin descansos.</div>`}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  document.getElementById("empSearch").addEventListener("input", renderEmployeeSearch);
+  document.getElementById("clearSearch").addEventListener("click", ()=>{
+    document.getElementById("empSearch").value = "";
+    renderEmployeeSearch();
+  });
+
+  document.body.addEventListener("click", (e)=>{
+    const openEmp = e.target.dataset.openEmp;
+    if(openEmp){
+      const p = personById(openEmp);
+      if(!p) return;
+      const box = document.getElementById("empResults");
+      box.style.display = "";
+      box.innerHTML = employeeCard(p);
+    }
+  });
+
+  /* =========================
+     EXPORT / IMPORT / RESET
+     ========================= */
+  document.getElementById("exportBtn").addEventListener("click", ()=>{
+    const blob = new Blob([JSON.stringify(state, null, 2)], {type:"application/json"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "planner_backup.json";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
+  document.getElementById("importBtn").addEventListener("click", ()=>{
+    document.getElementById("importFile").click();
+  });
+
+  document.getElementById("importFile").addEventListener("change", async (e)=>{
+    const file = e.target.files?.[0];
+    if(!file) return;
+    try{
+      const text = await file.text();
+      const data = JSON.parse(text);
+      if(!data.people || !data.shifts || !data.leaves || !data.breaks) throw new Error("Formato inválido");
+      state.people = data.people;
+      state.shifts = data.shifts;
+      state.leaves = data.leaves;
+      state.breaks = data.breaks;
+      save(); renderAll();
+      resetPersonForm(); resetShiftForm(); resetLeaveForm(); resetBreakForm();
+      showMsg("Importado ✅");
+    }catch{
+      showMsg("No se pudo importar (archivo inválido).", false);
+    }finally{
+      e.target.value = "";
+    }
+  });
+
+  document.getElementById("resetBtn").addEventListener("click", ()=>{
+    if(!confirm("¿Seguro? Borra todo en este dispositivo.")) return;
+    state.people = [];
+    state.shifts = [];
+    state.leaves = [];
+    state.breaks = [];
+    save(); renderAll();
+    resetPersonForm(); resetShiftForm(); resetLeaveForm(); resetBreakForm();
+    showMsg("Reset listo.");
+  });
+
+  // Export Excel (.xlsx)
+  document.getElementById("exportExcelBtn").addEventListener("click", ()=>{
+    try{
+      if(typeof XLSX === "undefined") throw new Error("XLSX no cargó");
+      const wb = XLSX.utils.book_new();
+
+      const peopleRows = state.people.map(p=>({
+        Nombre: p.name,
+        Apellido: p.lastName,
+        Sector: p.sector,
+        Zona: p.zone || "",
+        Puesto: p.position || "",
+        Rol: p.sector==="Parque" ? p.roleType : "Fijo",
+        "Rota cubre zona": (p.sector==="Parque" && p.roleType==="Rota") ? (p.coverZone||"") : "",
+        Telefono: p.phone || "",
+        Notas: p.note || ""
+      }));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(peopleRows), "Personal");
+
+      const shiftRows = state.shifts.map(s=>{
+        const p = personById(s.personId);
+        return {
+          Fecha: s.date,
+          Empleado: p ? fullName(p) : "",
+          Sector: p?.sector || "",
+          Zona: p?.zone || "",
+          Puesto: p?.position || "",
+          Inicio: s.start,
+          Fin: s.end,
+          Notas: s.note || ""
+        };
+      });
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(shiftRows), "Turnos");
+
+      const leaveRows = state.leaves.map(l=>{
+        const p = personById(l.personId);
+        return {
+          Dia: l.day,
+          Empleado: p ? fullName(p) : "",
+          Sector: l.sector,
+          Tipo: leaveTypeLabel(l),
+          Estado: l.status,
+          Nota: l.note || ""
+        };
+      });
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(leaveRows), "Libres");
+
+      const breakRows = state.breaks.map(b=>{
+        const emp = personById(b.personId);
+        const rota = b.rotaId ? personById(b.rotaId) : null;
+        return {
+          Dia: b.day,
+          Inicio: b.start,
+          Fin: b.end,
+          Zona: b.zone,
+          Puesto: b.position,
+          Empleado: emp ? fullName(emp) : "",
+          "Cubre (Rota)": rota ? fullName(rota) : "",
+          Estado: b.status,
+          Nota: b.note || ""
+        };
+      });
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(breakRows), "Descansos");
+
+      XLSX.writeFile(wb, "planner_export.xlsx");
+      showMsg("Excel exportado ✅");
+    }catch(err){
+      showMsg("No se pudo exportar a Excel. (Probá Exportar JSON).", false);
+      console.error(err);
+    }
+  });
+
+  /* =========================
+     INIT
+     ========================= */
+  fillSelectOptions(document.getElementById("p_sector"), sectorList(), false);
+  document.getElementById("p_sector").value = "Mantenimiento";
+  updatePersonSelectors();
+
+  function setDefaultDateInputs(){
+    const today = todayStr();
+    const bDay = document.getElementById("b_day");
+    if(bDay && !bDay.value) bDay.value = today;
+  }
+
+  // Modes (minimal)
+  function setModeP(editing){ setPersonMode(editing); }
+  function setModeS(editing){ setShiftMode(editing); }
+  function setModeL(editing){ setLeaveMode(editing); }
+  function setModeB(editing){ setBreakMode(editing); }
+
+  function setPersonMode(editing){
+    document.getElementById("personMode").textContent = `Modo: ${editing ? "Editar" : "Nuevo"}`;
+    document.getElementById("cancelPersonEdit").style.display = editing ? "" : "none";
+    document.getElementById("savePersonBtn").textContent = editing ? "Actualizar" : "Guardar";
+  }
+  function setShiftMode(editing){
+    document.getElementById("shiftMode").textContent = `Modo: ${editing ? "Editar" : "Nuevo"}`;
+    document.getElementById("cancelShiftEdit").style.display = editing ? "" : "none";
+    document.getElementById("saveShiftBtn").textContent = editing ? "Actualizar turno" : "Guardar turno";
+  }
+  function setLeaveMode(editing){
+    document.getElementById("leaveMode").textContent = `Modo: ${editing ? "Editar" : "Nuevo"}`;
+    document.getElementById("cancelLeaveEdit").style.display = editing ? "" : "none";
+    document.getElementById("saveLeaveBtn").textContent = editing ? "Actualizar" : "Guardar";
+  }
+  function setBreakMode(editing){
+    document.getElementById("breakMode").textContent = `Modo: ${editing ? "Editar" : "Nuevo"}`;
+    document.getElementById("cancelBreakEdit").style.display = editing ? "" : "none";
+    document.getElementById("saveBreakBtn").textContent = editing ? "Actualizar" : "Crear descanso";
+  }
+
+  // Turnos reset
+  function resetShiftForm(){
+    editingShiftId = null;
+    document.getElementById("t_date").value = "";
+    document.getElementById("t_start").value = "";
+    document.getElementById("t_end").value = "";
+    document.getElementById("t_note").value = "";
+    setShiftMode(false);
+  }
+
+  // Libres init
+  syncLeaveUI();
+  setDefaultDateInputs();
+  renderAll();
+  suggestBreakStart();
+</script>
+</body>
+</html>
+
